@@ -66,6 +66,28 @@ CREATE TRIGGER referrals_updated_at
   BEFORE UPDATE ON referrals
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
+-- SPECIALISTS
+CREATE TABLE IF NOT EXISTS specialists (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  specialty TEXT NOT NULL,
+  clinic_name TEXT,
+  address TEXT,
+  city TEXT DEFAULT 'Ottawa',
+  province TEXT DEFAULT 'ON',
+  phone TEXT,
+  fax TEXT,
+  email TEXT,
+  accepting_referrals BOOLEAN DEFAULT TRUE,
+  estimated_wait_weeks TEXT,
+  languages TEXT[] DEFAULT ARRAY['English'],
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Add specialist_id to referrals
+ALTER TABLE referrals ADD COLUMN IF NOT EXISTS specialist_id UUID REFERENCES specialists(id);
+
 -- ─────────────────────────────────────────
 -- SEED: Synthea Patients
 -- ─────────────────────────────────────────
@@ -125,6 +147,91 @@ INSERT INTO patients (name, dob, gender, health_card_number, conditions, medicat
   ARRAY['Insulin Glargine 20 units nightly', 'Gabapentin 300mg three times daily', 'Metformin 1000mg twice daily'],
   ARRAY['None known'],
   'Dr. Sarah Chen', '2026-06-08'
+);
+
+-- ─────────────────────────────────────────
+-- SEED: Specialists (Ottawa)
+-- ─────────────────────────────────────────
+INSERT INTO specialists (name, specialty, clinic_name, address, city, phone, fax, accepting_referrals, estimated_wait_weeks, languages, notes) VALUES
+(
+  'Dr. Amir Hosseini', 'Cardiology',
+  'Ottawa Heart Institute', '40 Ruskin St', 'Ottawa',
+  '613-761-4000', '613-761-4001',
+  TRUE, '6-8 weeks',
+  ARRAY['English', 'Farsi'],
+  'Specializes in heart failure, aortic stenosis, and arrhythmia. Accepts urgent referrals within 2 weeks.'
+),
+(
+  'Dr. Priya Nair', 'Respirology',
+  'The Ottawa Hospital — Respiratory Clinic', '501 Smyth Rd', 'Ottawa',
+  '613-737-8899', '613-737-8900',
+  TRUE, '8-12 weeks',
+  ARRAY['English', 'French', 'Malayalam'],
+  'COPD, asthma, interstitial lung disease. Accepts spirometry referrals.'
+),
+(
+  'Dr. Marc Lefebvre', 'Psychiatry',
+  'Royal Ottawa Mental Health Centre', '1145 Carling Ave', 'Ottawa',
+  '613-722-6521', '613-798-2989',
+  TRUE, '12-16 weeks',
+  ARRAY['English', 'French'],
+  'General adult psychiatry. Anxiety, depression, bipolar. Requires PHQ-9 and GAD-7 with referral.'
+),
+(
+  'Dr. Anita Sharma', 'Rheumatology',
+  'Ottawa Arthritis Centre', '210 Melrose Ave', 'Ottawa',
+  '613-729-1066', '613-729-1067',
+  TRUE, '10-14 weeks',
+  ARRAY['English', 'Hindi'],
+  'Rheumatoid arthritis, lupus, psoriatic arthritis. Biologics experience.'
+),
+(
+  'Dr. James Whitfield', 'Pulmonology',
+  'The Ottawa Hospital — Lung Health', '1053 Carling Ave', 'Ottawa',
+  '613-761-5353', '613-761-5354',
+  FALSE, '14-18 weeks',
+  ARRAY['English'],
+  'Currently not accepting new referrals until September. Redirecting to Dr. Nair for COPD cases.'
+),
+(
+  'Dr. Fatima Al-Rashid', 'Endocrinology',
+  'Ottawa Diabetes & Endocrine Centre', '1 Centrepointe Dr', 'Ottawa',
+  '613-596-7777', '613-596-7778',
+  TRUE, '8-10 weeks',
+  ARRAY['English', 'Arabic', 'French'],
+  'Diabetes management, thyroid disorders, adrenal conditions. Accepts insulin management referrals.'
+),
+(
+  'Dr. Kevin Park', 'Nephrology',
+  'The Ottawa Hospital — Kidney Care', '501 Smyth Rd', 'Ottawa',
+  '613-737-8000', '613-737-8001',
+  TRUE, '6-10 weeks',
+  ARRAY['English', 'Korean'],
+  'CKD management, dialysis planning, hypertensive nephropathy. Early CKD referrals welcome.'
+),
+(
+  'Dr. Sophie Tremblay', 'Neurology',
+  'Ottawa Civic Hospital — Neurology', '1053 Carling Ave', 'Ottawa',
+  '613-761-4917', '613-761-4918',
+  TRUE, '10-16 weeks',
+  ARRAY['English', 'French'],
+  'Headache, epilepsy, neuropathy, MS. Requires MRI or CT before referral for most cases.'
+),
+(
+  'Dr. Omar Abdullah', 'Orthopedic Surgery',
+  'Ottawa Bone & Joint', '737 Parkdale Ave', 'Ottawa',
+  '613-729-3300', '613-729-3301',
+  TRUE, '16-20 weeks',
+  ARRAY['English', 'Arabic'],
+  'Hip and knee replacement, sports injuries, fracture management.'
+),
+(
+  'Dr. Lisa Chen', 'Dermatology',
+  'Ottawa Skin Clinic', '1580 Merivale Rd', 'Ottawa',
+  '613-224-4440', '613-224-4441',
+  TRUE, '12-20 weeks',
+  ARRAY['English', 'Mandarin', 'Cantonese'],
+  'Psoriasis, eczema, skin cancer screening. Teledermatology available for initial consult.'
 );
 
 -- ─────────────────────────────────────────

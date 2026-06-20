@@ -4,6 +4,7 @@ const cors = require('cors');
 
 const referralRoutes = require('./routes/referrals');
 const reportRoutes = require('./routes/reports');
+const specialistRoutes = require('./routes/specialists');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -24,6 +25,7 @@ app.get('/', (req, res) => {
 
 app.use('/api/referrals', referralRoutes);
 app.use('/api/referrals', reportRoutes);
+app.use('/api/specialists', specialistRoutes);
 app.use('/api/patients', (req, res, next) => {
   req.url = '/patients' + req.url;
   referralRoutes(req, res, next);
