@@ -10,8 +10,8 @@ LoopMD fixes the broken referral loop in primary care. Referrals get sent and fo
 
 | | |
 |---|---|
-| **Live Demo** | _Coming soon_ |
-| **Demo Video** | _Coming soon_ |
+| **Live Demo** | [healthcare-hackathon-rosy.vercel.app](https://healthcare-hackathon-rosy.vercel.app/) |
+| **Demo Video** | [youtu.be/wSJk4Z1oV_A](https://youtu.be/wSJk4Z1oV_A) |
 
 ---
 
