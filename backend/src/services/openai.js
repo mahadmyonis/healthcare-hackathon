@@ -58,4 +58,37 @@ Respond ONLY with valid JSON.`;
   return JSON.parse(response.choices[0].message.content);
 }
 
-module.exports = { extractFromReport, suggestSpecialist };
+async function extractClinicalNotes(transcript, patientHistory = null) {
+  const prompt = `You are a clinical AI assistant listening to a doctor-patient appointment in Canada.
+
+Extract the following from the transcript in structured JSON:
+
+1. symptoms — Array of symptoms mentioned by the patient
+2. duration — How long symptoms have been present
+3. severity — mild / moderate / severe
+4. relevantHistory — Array of relevant medical history items (from transcript or patient record below)
+5. urgencyAssessment — routine / urgent / emergent
+6. urgencyReason — One sentence explaining the urgency level
+7. recommendedAction — What the doctor should do next (e.g. "Cardiology referral", "Order ECG", "Blood work")
+8. suggestedSpecialistType — The specialist type most appropriate (e.g. "Cardiologist", "Respirologist")
+9. referralReason — A concise, clinical referral reason the doctor can use (2-3 sentences, professional tone)
+10. redFlags — Array of any red flag symptoms that need immediate attention
+
+Patient history context: ${patientHistory || 'Not provided'}
+
+Respond ONLY with valid JSON. No markdown.`;
+
+  const response = await client.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      { role: 'system', content: prompt },
+      { role: 'user', content: `APPOINTMENT TRANSCRIPT:\n\n${transcript}` },
+    ],
+    temperature: 0.1,
+    response_format: { type: 'json_object' },
+  });
+
+  return JSON.parse(response.choices[0].message.content);
+}
+
+module.exports = { extractFromReport, suggestSpecialist, extractClinicalNotes };
