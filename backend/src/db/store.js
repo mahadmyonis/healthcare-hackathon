@@ -1,66 +1,142 @@
-const { v4: uuidv4 } = require('uuid');
+const supabase = require('./supabase');
 
-// In-memory store — swap for a real DB (Postgres/Supabase) when ready
-const referrals = new Map();
+// ─────────────────────────────────────────
+// PATIENTS
+// ─────────────────────────────────────────
 
-const REFERRAL_STATUS = {
-  SENT: 'sent',
-  RECEIVED: 'received',
-  BOOKED: 'booked',
-  REPORT_RETURNED: 'report_returned',
-  CLOSED: 'closed',
-  REJECTED: 'rejected',
-};
-
-function createReferral({ patientName, patientDOB, referringDoctor, specialistType, reason, urgency = 'routine' }) {
-  const id = uuidv4();
-  const referral = {
-    id,
-    patientName,
-    patientDOB,
-    referringDoctor,
-    specialistType,
-    reason,
-    urgency,
-    status: REFERRAL_STATUS.SENT,
-    sentAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    report: null,
-    actionItems: [],
-    rejectionReason: null,
-    suggestedNextStep: null,
-  };
-  referrals.set(id, referral);
-  return referral;
+async function getAllPatients() {
+  const { data, error } = await supabase
+    .from('patients')
+    .select('*')
+    .order('name');
+  if (error) throw error;
+  return data;
 }
 
-function getAllReferrals() {
-  return Array.from(referrals.values()).sort(
-    (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
-  );
+async function getPatientById(id) {
+  const { data, error } = await supabase
+    .from('patients')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) throw error;
+  return data;
 }
 
-function getReferralById(id) {
-  return referrals.get(id) || null;
+// ─────────────────────────────────────────
+// REFERRALS
+// ─────────────────────────────────────────
+
+async function getAllReferrals(status = null) {
+  let query = supabase
+    .from('referrals')
+    .select(`*, patients(name, dob, health_card_number, conditions, medications)`)
+    .order('updated_at', { ascending: false });
+
+  if (status) query = query.eq('status', status);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data;
 }
 
-function updateReferral(id, updates) {
-  const referral = referrals.get(id);
-  if (!referral) return null;
-  const updated = { ...referral, ...updates, updatedAt: new Date().toISOString() };
-  referrals.set(id, updated);
-  return updated;
+async function getReferralById(id) {
+  const { data, error } = await supabase
+    .from('referrals')
+    .select(`*, patients(*)`)
+    .eq('id', id)
+    .single();
+  if (error) throw error;
+  return data;
 }
 
-function deleteReferral(id) {
-  return referrals.delete(id);
+async function createReferral({ patientId, referringDoctor, specialistType, reason, urgency = 'routine', appointmentNotes = null }) {
+  const { data, error } = await supabase
+    .from('referrals')
+    .insert({
+      patient_id: patientId,
+      referring_doctor: referringDoctor,
+      specialist_type: specialistType,
+      reason,
+      urgency,
+      appointment_notes: appointmentNotes,
+      status: 'pending',
+    })
+    .select(`*, patients(*)`)
+    .single();
+  if (error) throw error;
+
+  // Log timeline event
+  await addTimelineEvent(data.id, 'pending', 'doctor', 'Referral created and sent to specialist.');
+
+  return data;
+}
+
+async function updateReferral(id, updates) {
+  const { data, error } = await supabase
+    .from('referrals')
+    .update(updates)
+    .eq('id', id)
+    .select(`*, patients(*)`)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateReferralStatus(id, status, triggeredBy = 'system', note = null) {
+  const { data, error } = await supabase
+    .from('referrals')
+    .update({ status })
+    .eq('id', id)
+    .select(`*, patients(*)`)
+    .single();
+  if (error) throw error;
+
+  // Log timeline event for every status change
+  await addTimelineEvent(id, status, triggeredBy, note || `Status updated to ${status}`);
+
+  return data;
+}
+
+async function deleteReferral(id) {
+  const { error } = await supabase
+    .from('referrals')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
+  return true;
+}
+
+// ─────────────────────────────────────────
+// TIMELINE EVENTS
+// ─────────────────────────────────────────
+
+async function addTimelineEvent(referralId, status, triggeredBy, note = null) {
+  const { error } = await supabase
+    .from('timeline_events')
+    .insert({ referral_id: referralId, status, triggered_by: triggeredBy, note });
+  if (error) console.error('Timeline event error:', error);
+}
+
+async function getTimeline(referralId) {
+  const { data, error } = await supabase
+    .from('timeline_events')
+    .select('*')
+    .eq('referral_id', referralId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data;
 }
 
 module.exports = {
-  createReferral,
+  getAllPatients,
+  getPatientById,
   getAllReferrals,
   getReferralById,
+  createReferral,
   updateReferral,
+  updateReferralStatus,
   deleteReferral,
-  REFERRAL_STATUS,
+  addTimelineEvent,
+  getTimeline,
 };
