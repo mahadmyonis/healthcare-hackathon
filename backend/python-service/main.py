@@ -9,14 +9,29 @@ from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-import torch
-from pyannote.audio import Pipeline
-from openai import OpenAI
-from pydub import AudioSegment
-
 load_dotenv()
 
-app = FastAPI(title="LoopClose Audio Service", version="1.0.0")
+# ─────────────────────────────────────────
+# Optional imports — graceful fallback
+# ─────────────────────────────────────────
+
+try:
+    import torch
+    from pyannote.audio import Pipeline
+    PYANNOTE_AVAILABLE = True
+except Exception as e:
+    print(f"pyannote unavailable: {e}")
+    Pipeline = None
+    PYANNOTE_AVAILABLE = False
+    torch = None
+
+from openai import OpenAI
+
+# ─────────────────────────────────────────
+# App setup
+# ─────────────────────────────────────────
+
+app = FastAPI(title="LoopMD Audio Service", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,33 +40,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─────────────────────────────────────────
-# Init clients
-# ─────────────────────────────────────────
-
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Load pyannote pipeline once at startup
-# Requires HuggingFace token with access to pyannote/speaker-diarization-3.1
-# Accept terms at: https://huggingface.co/pyannote/speaker-diarization-3.1
-print("Loading pyannote speaker diarization model...")
-try:
-    diarization_pipeline = Pipeline.from_pretrained(
-        "pyannote/speaker-diarization-3.1",
-        use_auth_token=os.getenv("HUGGINGFACE_TOKEN")
-    )
-    # Use GPU if available
-    if torch.cuda.is_available():
-        diarization_pipeline = diarization_pipeline.to(torch.device("cuda"))
-        print("Using GPU for diarization")
-    else:
-        print("Using CPU for diarization")
-    DIARIZATION_AVAILABLE = True
-except Exception as e:
-    print(f"pyannote model could not load: {e}")
-    print("Falling back to Whisper-only mode (no speaker labels)")
-    DIARIZATION_AVAILABLE = False
-    diarization_pipeline = None
+DIARIZATION_AVAILABLE = False
+diarization_pipeline = None
+
+if PYANNOTE_AVAILABLE:
+    print("Loading pyannote speaker diarization model...")
+    try:
+        diarization_pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-3.1",
+            use_auth_token=os.getenv("HUGGINGFACE_TOKEN")
+        )
+        if torch and torch.cuda.is_available():
+            diarization_pipeline = diarization_pipeline.to(torch.device("cuda"))
+            print("Using GPU for diarization")
+        else:
+            print("Using CPU for diarization")
+        DIARIZATION_AVAILABLE = True
+    except Exception as e:
+        print(f"pyannote model could not load: {e}")
+        print("Falling back to Whisper-only mode")
+else:
+    print("Running in Whisper-only mode (pyannote not available on this Python version)")
 
 
 # ─────────────────────────────────────────
@@ -61,7 +73,7 @@ except Exception as e:
 @app.get("/")
 def root():
     return {
-        "service": "LoopClose Audio Service",
+        "service": "LoopMD Audio Service",
         "diarization": "available" if DIARIZATION_AVAILABLE else "unavailable (Whisper-only mode)",
         "whisper": "available",
     }
@@ -77,44 +89,26 @@ async def transcribe(
     audio: UploadFile = File(...),
     patient_history: str = Form(default="")
 ):
-    """
-    Full pipeline:
-    1. pyannote diarizes the audio (who spoke when)
-    2. Whisper transcribes the audio with timestamps
-    3. We merge both to produce a labeled Doctor/Patient transcript
-    4. GPT-4o extracts clinical notes from the labeled transcript
-    """
     audio_bytes = await audio.read()
+    content_type = audio.content_type or "audio/webm"
 
-    # Save to temp file (pyannote needs a file path)
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        tmp_path = tmp.name
-        # Convert to wav for compatibility
-        audio_segment = convert_to_wav(audio_bytes, audio.content_type)
-        audio_segment.export(tmp_path, format="wav")
+    if DIARIZATION_AVAILABLE:
+        labeled_transcript = await full_pipeline(audio_bytes, content_type)
+    else:
+        labeled_transcript = await whisper_only(audio_bytes, content_type)
 
-    try:
-        if DIARIZATION_AVAILABLE:
-            labeled_transcript = await full_pipeline(tmp_path, audio_bytes, audio.content_type)
-        else:
-            labeled_transcript = await whisper_only(audio_bytes, audio.content_type)
+    clinical_notes = extract_clinical_notes(labeled_transcript, patient_history)
 
-        # Extract clinical notes from labeled transcript
-        clinical_notes = extract_clinical_notes(labeled_transcript, patient_history)
-
-        return {
-            "success": True,
-            "transcript": labeled_transcript,
-            "clinical_notes": clinical_notes,
-            "diarization_used": DIARIZATION_AVAILABLE,
-        }
-
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
+    return {
+        "success": True,
+        "transcript": labeled_transcript,
+        "clinical_notes": clinical_notes,
+        "diarization_used": DIARIZATION_AVAILABLE,
+    }
 
 
 # ─────────────────────────────────────────
-# Text-only endpoint (no audio needed)
+# Text-only endpoint
 # POST /transcribe/text
 # ─────────────────────────────────────────
 
@@ -124,7 +118,6 @@ class TextRequest(BaseModel):
 
 @app.post("/transcribe/text")
 def transcribe_text(body: TextRequest):
-    """Extract clinical notes from an existing transcript"""
     clinical_notes = extract_clinical_notes(body.transcript, body.patient_history)
     return {
         "success": True,
@@ -138,48 +131,47 @@ def transcribe_text(body: TextRequest):
 # Core pipeline functions
 # ─────────────────────────────────────────
 
-async def full_pipeline(wav_path: str, audio_bytes: bytes, content_type: str) -> str:
-    """Run pyannote diarization + Whisper transcription and merge them"""
+async def full_pipeline(audio_bytes: bytes, content_type: str) -> str:
+    ext = get_extension(content_type)
 
-    # Step 1: pyannote — get speaker segments
-    diarization = diarization_pipeline(wav_path)
+    with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
 
-    segments = []
-    for turn, _, speaker in diarization.itertracks(yield_label=True):
-        segments.append({
-            "start": turn.start,
-            "end": turn.end,
-            "speaker": speaker,  # e.g. SPEAKER_00, SPEAKER_01
-        })
+    try:
+        diarization = diarization_pipeline(tmp_path)
 
-    # Step 2: Whisper — get transcript with word timestamps
-    audio_file = io.BytesIO(audio_bytes)
-    audio_file.name = f"audio.{get_extension(content_type)}"
+        segments = []
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            segments.append({
+                "start": turn.start,
+                "end": turn.end,
+                "speaker": speaker,
+            })
 
-    whisper_response = openai_client.audio.transcriptions.create(
-        model="whisper-1",
-        file=audio_file,
-        language="en",
-        response_format="verbose_json",
-        timestamp_granularities=["word"],
-    )
+        audio_file = io.BytesIO(audio_bytes)
+        audio_file.name = f"audio.{ext}"
 
-    words = whisper_response.words or []
+        whisper_response = openai_client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+            language="en",
+            response_format="verbose_json",
+            timestamp_granularities=["word"],
+        )
 
-    # Step 3: Assign each word to a speaker based on timestamp overlap
-    labeled_words = assign_speakers(words, segments)
+        words = whisper_response.words or []
+        labeled_words = assign_speakers(words, segments)
+        return build_transcript(labeled_words)
 
-    # Step 4: Build readable transcript with Doctor/Patient labels
-    # We assume 2 speakers: the one who speaks first/more = Doctor
-    transcript = build_transcript(labeled_words, segments)
-
-    return transcript
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
 
 
 async def whisper_only(audio_bytes: bytes, content_type: str) -> str:
-    """Whisper transcription without speaker diarization"""
+    ext = get_extension(content_type)
     audio_file = io.BytesIO(audio_bytes)
-    audio_file.name = f"audio.{get_extension(content_type)}"
+    audio_file.name = f"audio.{ext}"
 
     response = openai_client.audio.transcriptions.create(
         model="whisper-1",
@@ -192,11 +184,10 @@ async def whisper_only(audio_bytes: bytes, content_type: str) -> str:
 
 
 def assign_speakers(words: list, segments: list) -> list:
-    """Map each word to the speaker segment it falls in"""
     result = []
     for word in words:
         word_mid = (word.start + word.end) / 2
-        speaker = "SPEAKER_00"  # default
+        speaker = "SPEAKER_00"
         for seg in segments:
             if seg["start"] <= word_mid <= seg["end"]:
                 speaker = seg["speaker"]
@@ -205,13 +196,7 @@ def assign_speakers(words: list, segments: list) -> list:
     return result
 
 
-def build_transcript(labeled_words: list, segments: list) -> str:
-    """
-    Build a clean Doctor/Patient labeled transcript.
-    Assigns SPEAKER_00 = Doctor (typically speaks first),
-    SPEAKER_01 = Patient. More speakers get generic labels.
-    """
-    # Determine which speaker is the doctor (first to speak)
+def build_transcript(labeled_words: list) -> str:
     speaker_map = {}
     seen = []
     for w in labeled_words:
@@ -225,7 +210,6 @@ def build_transcript(labeled_words: list, segments: list) -> str:
     for i, s in enumerate(seen[2:], start=3):
         speaker_map[s] = f"Speaker {i}"
 
-    # Group consecutive words by same speaker into utterances
     lines = []
     current_speaker = None
     current_words = []
@@ -234,27 +218,17 @@ def build_transcript(labeled_words: list, segments: list) -> str:
         if w["speaker"] != current_speaker:
             if current_words and current_speaker:
                 label = speaker_map.get(current_speaker, current_speaker)
-                text = " ".join(current_words).strip()
-                lines.append(f"{label}: {text}")
+                lines.append(f"{label}: {' '.join(current_words).strip()}")
             current_speaker = w["speaker"]
             current_words = [w["word"].strip()]
         else:
             current_words.append(w["word"].strip())
 
-    # Add final utterance
     if current_words and current_speaker:
         label = speaker_map.get(current_speaker, current_speaker)
-        text = " ".join(current_words).strip()
-        lines.append(f"{label}: {text}")
+        lines.append(f"{label}: {' '.join(current_words).strip()}")
 
     return "\n\n".join(lines)
-
-
-def convert_to_wav(audio_bytes: bytes, content_type: str) -> AudioSegment:
-    """Convert any audio format to WAV for pyannote compatibility"""
-    fmt = get_extension(content_type)
-    audio_io = io.BytesIO(audio_bytes)
-    return AudioSegment.from_file(audio_io, format=fmt)
 
 
 def get_extension(content_type: str) -> str:
@@ -266,12 +240,12 @@ def get_extension(content_type: str) -> str:
         "audio/mp3": "mp3",
         "audio/wav": "wav",
         "audio/ogg": "ogg",
+        "audio/x-wav": "wav",
     }
     return mapping.get(content_type, "webm")
 
 
 def extract_clinical_notes(transcript: str, patient_history: str = "") -> dict:
-    """GPT-4o extracts structured clinical notes from the labeled transcript"""
     prompt = f"""You are a clinical AI assistant analyzing a doctor-patient appointment transcript from Canada.
 
 Extract the following in structured JSON:
