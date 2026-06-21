@@ -1,4 +1,20 @@
 @import 'tailwindcss';
+
+/* Hide scrollbar but keep scroll functionality */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Better tap targets on mobile */
+@media (max-width: 768px) {
+  button, a {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 

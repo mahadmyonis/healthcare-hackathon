@@ -58,20 +58,20 @@ export default function DoctorDashboard() {
         <p className="text-muted-foreground">Welcome back, Dr. Sarah Chen</p>
       </div>
 
-      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Total Referrals" value={referrals.length} icon={ClipboardList} />
         <Stat label="Pending" value={count("pending")} icon={Clock} />
         <Stat label="Reports Ready" value={count("report_submitted")} icon={FileCheck} highlight />
         <Stat label="Closed" value={count("closed")} icon={FolderCheck} />
       </div>
 
-      <div id="referrals" className="mb-3 flex flex-wrap gap-2">
+      <div id="referrals" className="mb-3 flex gap-2 overflow-x-auto pb-1 scrollbar-none">
         {TABS.map((t) => (
           <button
             key={t.label}
             onClick={() => setTab(t.label)}
             className={cn(
-              "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
+              "shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
               tab === t.label ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground",
             )}
           >
@@ -86,7 +86,7 @@ export default function DoctorDashboard() {
           <Link
             key={r.id}
             href={`/referrals/${r.id}`}
-            className="flex items-center gap-4 border-b border-border px-4 py-3 last:border-0 hover:bg-muted/50"
+            className="flex items-center gap-3 border-b border-border px-4 py-3.5 last:border-0 hover:bg-muted/50 active:bg-muted"
           >
             <Avatar name={r.patients?.name ?? "?"} size="sm" />
             <div className="min-w-0 flex-1">
@@ -96,11 +96,16 @@ export default function DoctorDashboard() {
                   · {r.patients ? age(r.patients.dob) : "?"}y
                 </span>
               </p>
-              <p className="truncate text-sm text-muted-foreground">{r.specialistType}</p>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <p className="truncate text-xs text-muted-foreground">{r.specialistType}</p>
+                <span className="text-muted-foreground/40">·</span>
+                <UrgencyBadge urgency={r.urgency} />
+              </div>
             </div>
-            <UrgencyBadge urgency={r.urgency} />
-            <StatusBadge status={r.status} />
-            <span className="hidden w-24 text-right text-sm text-muted-foreground sm:block">{fmtDate(r.created_at)}</span>
+            <div className="flex flex-col items-end gap-1.5 shrink-0">
+              <StatusBadge status={r.status} />
+              <span className="text-xs text-muted-foreground">{fmtDate(r.created_at)}</span>
+            </div>
           </Link>
         ))}
       </div>

@@ -182,7 +182,7 @@ export default function AppointmentPage() {
         <p className="text-muted-foreground">AI-assisted clinical documentation</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* LEFT: recording + transcript */}
         <Card className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
