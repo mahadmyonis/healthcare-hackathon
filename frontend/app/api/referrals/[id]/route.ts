@@ -1,23 +1,20 @@
 import { NextResponse } from "next/server"
-
-const B = process.env.BACKEND_URL ?? "http://localhost:3001"
-
-function normalize(r: Record<string, unknown>) {
-  if (!r) return r
-  return {
-    ...r,
-    patientId: r.patient_id ?? r.patientId,
-    referringDoctor: r.referring_doctor ?? r.referringDoctor,
-    specialistType: r.specialist_type ?? r.specialistType,
-    appointmentNotes: r.appointment_notes ?? r.appointmentNotes ?? "",
-    created_at: r.sent_at ?? r.created_at,
-    patients: r.patients,
-  }
-}
+import { supabase } from "@/lib/supabase"
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const res = await fetch(`${B}/api/referrals/${id}`)
+  const res = await supabase(`referrals?id=eq.${id}&select=*,patients(*)`)
   const data = await res.json()
-  return NextResponse.json({ referral: normalize(data.referral) }, { status: res.status })
+  const r = Array.isArray(data) ? data[0] : null
+  if (!r) return NextResponse.json({ error: "Not found" }, { status: 404 })
+  return NextResponse.json({
+    referral: {
+      ...r,
+      patientId: r.patient_id,
+      referringDoctor: r.referring_doctor,
+      specialistType: r.specialist_type,
+      appointmentNotes: r.appointment_notes ?? "",
+      created_at: r.sent_at ?? r.created_at,
+    },
+  })
 }

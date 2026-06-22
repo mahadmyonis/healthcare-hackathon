@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server"
-
-const B = process.env.BACKEND_URL ?? "http://localhost:3001"
+import { supabase } from "@/lib/supabase"
 
 export async function GET() {
-  const res = await fetch(`${B}/api/specialists`)
+  const res = await supabase("specialists?select=*&order=name")
   const data = await res.json()
-  return NextResponse.json({ specialists: data.specialists ?? [] })
+  return NextResponse.json({ specialists: Array.isArray(data) ? data : [] })
 }

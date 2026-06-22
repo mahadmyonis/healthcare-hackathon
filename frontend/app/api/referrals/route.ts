@@ -1,47 +1,45 @@
 import { NextResponse } from "next/server"
-
-const B = process.env.BACKEND_URL ?? "http://localhost:3001"
+import { supabase } from "@/lib/supabase"
 
 export async function GET(req: Request) {
   const status = new URL(req.url).searchParams.get("status")
-  const url = status ? `${B}/api/referrals?status=${status}` : `${B}/api/referrals`
-  const res = await fetch(url)
+  const filter = status ? `&status=eq.${status}` : ""
+  const res = await supabase(
+    `referrals?select=*,patients(*)&order=sent_at.desc${filter}`
+  )
   const data = await res.json()
-  // Normalize field names: backend uses snake_case, frontend expects camelCase for some fields
-  const referrals = (data.referrals ?? []).map(normalize)
+  const referrals = (Array.isArray(data) ? data : []).map(normalize)
   return NextResponse.json({ referrals })
 }
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const res = await fetch(`${B}/api/referrals`, {
+  const res = await supabase("referrals", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      patientId: body.patientId,
-      referringDoctor: body.referringDoctor ?? "Dr. Sarah Chen",
-      specialistType: body.specialistType,
+      patient_id: body.patientId,
+      referring_doctor: body.referringDoctor ?? "Dr. Sarah Chen",
+      specialist_type: body.specialistType,
       reason: body.reason,
       urgency: body.urgency ?? "routine",
-      appointmentNotes: body.appointmentNotes ?? "",
+      appointment_notes: body.appointmentNotes ?? "",
+      status: "pending",
     }),
   })
   const data = await res.json()
-  return NextResponse.json({ referral: normalize(data.referral) }, { status: res.status })
+  const referral = Array.isArray(data) ? data[0] : data
+  return NextResponse.json({ referral: normalize(referral) }, { status: 201 })
 }
 
 function normalize(r: Record<string, unknown>) {
   if (!r) return r
   return {
     ...r,
-    // map patient_id → patientId so frontend components work
-    patientId: r.patient_id ?? r.patientId,
-    // map referring_doctor → referringDoctor
-    referringDoctor: r.referring_doctor ?? r.referringDoctor,
-    specialistType: r.specialist_type ?? r.specialistType,
-    appointmentNotes: r.appointment_notes ?? r.appointmentNotes ?? "",
+    patientId: r.patient_id,
+    referringDoctor: r.referring_doctor,
+    specialistType: r.specialist_type,
+    appointmentNotes: r.appointment_notes ?? "",
     created_at: r.sent_at ?? r.created_at,
-    // Keep patients join if present
     patients: r.patients,
   }
 }

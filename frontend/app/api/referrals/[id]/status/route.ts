@@ -1,19 +1,26 @@
 import { NextResponse } from "next/server"
-
-const B = process.env.BACKEND_URL ?? "http://localhost:3001"
+import { supabase } from "@/lib/supabase"
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const body = await req.json()
-  const res = await fetch(`${B}/api/referrals/${id}/status`, {
+  const { status, triggeredBy, note } = await req.json()
+
+  const res = await supabase(`referrals?id=eq.${id}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status, updated_at: new Date().toISOString() }),
+  })
+
+  // Also log timeline event
+  await supabase("timeline_events", {
+    method: "POST",
     body: JSON.stringify({
-      status: body.status,
-      triggeredBy: body.triggeredBy ?? "System",
-      note: body.note ?? "",
+      referral_id: id,
+      status,
+      triggered_by: triggeredBy ?? "System",
+      note: note ?? "",
     }),
   })
+
   const data = await res.json()
-  return NextResponse.json(data, { status: res.status })
+  return NextResponse.json({ referral: Array.isArray(data) ? data[0] : data })
 }
